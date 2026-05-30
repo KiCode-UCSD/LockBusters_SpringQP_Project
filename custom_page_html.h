@@ -170,7 +170,8 @@ const char CUSTOM_PAGE_HTML[] PROGMEM = R"HTML_WRAPPER(
                 let message = "EMAIL_UPDATE:";
                 message = message.concat(this.value);
                 console.log("Email message: " + message);
-                //send(message);
+                emailAddr.value = "";
+                send(message);
             }
         });
     </script>
