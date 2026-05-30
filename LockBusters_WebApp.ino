@@ -1,6 +1,6 @@
 /*
  * DIYables WebApp Library - Custom WebApp
- * 
+ *
  * Setup:
  * 1. Change WiFi name and password below
  * 2. Upload to your Arduino
@@ -18,8 +18,8 @@
 #include "CustomWebApp.h"
 
 // CHANGE THESE TO YOUR WIFI DETAILS
-const char WIFI_SSID[] = "Key’s iPhone (2)";
-const char WIFI_PASSWORD[] = "4q6x2tb3ewf11";
+const char WIFI_SSID[] = "Minh";
+const char WIFI_PASSWORD[] = "12345678";
 
 // Create server and pages
 ESP32ServerFactory serverFactory;
@@ -28,9 +28,9 @@ DIYablesHomePage homePage;
 CustomWebAppPage customPage;
 
 // ************** KI VARIABLES ************** //
-//using my personal email to send messages 
+//using my personal email to send messages
 //(ucsd emails have too many restrictions to work)
-const char* SENDER_EMAIL      = "keeper.of.keys777@gmail.com"; 
+const char* SENDER_EMAIL      = "keeper.of.keys777@gmail.com";
 const char* SENDER_EMAIL_NAME = "Team LockBusters";
 const char* SENDER_PASS       = "aeex gnxo erix lzcc";
 static String RECEIVER_EMAIL  = "";
@@ -41,7 +41,7 @@ EMailSender emailSend(SENDER_EMAIL, SENDER_PASS,
                       "smtp.gmail.com", 465);  // Port 465 for WifiClientSecure
 
 //custom payload signatures
-const String ALARM_DATA = "ALARM_TOGGLE:"; //recieve on/off signal from webapp
+const String ALARM_DATA = "ALARM_TOGGLE:"; //receive on/off signal from webapp
 const String EMAIL_DATA = "EMAIL_UPDATE:"; //update receiver email based on input from webapp
 
 // ************** MINH & DANIEL VARIABLES ************** //
@@ -85,7 +85,10 @@ int hitCount   = 0; //Ki: removed "volatile" since you can't increment volatile 
 bool alarmTriggered     = false;
 bool alarmDisarmed      = false;
 bool systemOn           = true;
-bool warningSent        = false; //keeps track of if warning email has been sent already (prevents multiple repeat emails)
+bool vibrationWarningSent     = false; //keeps track of if warning email has been sent already (prevents multiple repeat emails)
+bool vibrationWarningCleared  = false; //keeps track of when email notifying cleared warning has sent
+bool badUserWarningSent       = false; //keeps track of when to send warning email
+bool badUserWarningCleared    = false; //keeps track of when email notifying cleared warning has sent
 
 unsigned long windowStart   = 0;
 unsigned long lastBlinkTime = 0;
@@ -94,7 +97,6 @@ int unauthorizedcount       = 0;
 
 // ******** HELPER FUNCTIONS ************ //
 // KI HELPERS
-
 void checkEmailValid(EMailSender::Response resp) {
   Serial.println("Response Status:");
   Serial.print("  Code: ");
@@ -183,7 +185,6 @@ bool isAuthorized(String uid) {
 // ***************** SETUP ***************** //
 void setup() {
   Serial.begin(9600);
-
   delay(1000);
 
   // ************* WEBAPP SETUP ************* //
@@ -200,21 +201,20 @@ void setup() {
       delay(1000);
     }
   }
-  
+ 
   // Set up what happens when web page sends commands
   customPage.onCustomMessageReceived([](const String& payload) {
     Serial.println("Received: " + payload);
 
     // Implement your message handling here
-
     //payload, ALARM_DATA = "ALARM_TOGGLE:ON" or "ALARM_TOGGLE:OFF"
     if (payload.startsWith(ALARM_DATA)) {
       String alarmData = payload.substring(ALARM_DATA.length()); //remove ALARM_TOGGLE
 
+
       if (alarmData.startsWith("ON")) {
         //turn on alarm
         flashRed(2);
-        alarmTriggered = true;
         alarmDisarmed = false;
       }
       else if (alarmData.startsWith("OFF")) {
@@ -227,8 +227,8 @@ void setup() {
       }
       else {
         Serial.println("Corrupted Alarm Data Payload.");
-      } 
-    } 
+      }
+    }
 
     //payload, EMAIL_DATA = "EMAIL_UPDATE:abc@gmail.com"
     else if (payload.startsWith(EMAIL_DATA)) {
@@ -240,12 +240,12 @@ void setup() {
       message.subject = "Team LockBusters Alarm Notification System";
       message.message = "Hello! Your email has been successfully updated. You will now receive email alerts when your scooter is in danger.";
       message.mime = MIME_TEXT_PLAIN;
-    
+   
       // Send email
       Serial.println("\nSending email via simple SMTP...");
       Serial.println("RECEIVER_EMAIL: " + RECEIVER_EMAIL);
       EMailSender::Response resp = emailSend.send(RECEIVER_EMAIL, message);
-    
+   
       // Check result
       checkEmailValid(resp);
     }
@@ -303,15 +303,33 @@ void loop() {
     Serial.print("Card scanned: ");
     Serial.println(uid);
     if (uid == MASTER_UIDS ){
-      systemOn = !systemOn;          
+      systemOn = !systemOn;        
       buzzerOff();                    
       Serial.println(systemOn ? "System ON" : "System OFF");
     }
     if (isAuthorized(uid)) {
       Serial.println("Authorized — alarm disarmed!");
       clearAlarm();
-      alarmDisarmed = true;
+      alarmDisarmed = true;  
       flashGreen(3);
+
+      if (badUserWarningCleared == false) {
+        // Prepare email message
+        EMailSender::EMailMessage message;
+        message.subject = "Team LockBusters - Unauthorized User Cleared!";
+        message.message = "Authorized user has cleared unauthorized access. Your scooter is now safe.";
+        message.mime = MIME_TEXT_PLAIN;
+     
+        // Send email
+        Serial.println("\nSending email via simple SMTP...");
+        Serial.println("RECEIVER_EMAIL: " + RECEIVER_EMAIL);
+        EMailSender::Response resp = emailSend.send(RECEIVER_EMAIL, message);
+     
+        // Check result
+        checkEmailValid(resp);
+
+        badUserWarningCleared = true;
+      }
     } else {
       Serial.println("Unauthorized card.");
       flashRed(2);
@@ -322,11 +340,30 @@ void loop() {
     rfid.PCD_StopCrypto1();
   }
   if (!systemOn) {
-  	return;
+    return;
   }
   if ( unauthorizedcount > 5 && !alarmTriggered) {
     alarmTriggered = true;
     Serial.println("!! ALARM — Please scan authorized cards");
+
+    if (badUserWarningSent == false) {
+        // Prepare email message
+        EMailSender::EMailMessage message;
+        message.subject = "Team LockBusters - Unauthorized User Detected!";
+        message.message = "Unauthorized user has attempted to access your scooter! Please check your scooter's safety as soon as possible.";
+        message.mime = MIME_TEXT_PLAIN;
+     
+        // Send email
+        Serial.println("\nSending email via simple SMTP...");
+        Serial.println("RECEIVER_EMAIL: " + RECEIVER_EMAIL);
+        EMailSender::Response resp = emailSend.send(RECEIVER_EMAIL, message);
+     
+        // Check result
+        checkEmailValid(resp);
+
+        badUserWarningSent = true;
+        badUserWarningCleared = false;
+      }
   }
   // ── 2. Evaluate hit count every WINDOW_MS ──
   if (now - windowStart >= WINDOW_MS) {
@@ -346,28 +383,47 @@ void loop() {
       alarmTriggered = true;
       Serial.println("!! ALARM — strong vibration detected !!");
 
-      if (warningSent == false) {
+      if (vibrationWarningSent == false) {
         // Prepare email message
         EMailSender::EMailMessage message;
         message.subject = "Team LockBusters - Disturbance Detected!";
         message.message = "Strong vibration has been detected! Please check your scooter's safety as soon as possible.";
         message.mime = MIME_TEXT_PLAIN;
-      
+     
         // Send email
         Serial.println("\nSending email via simple SMTP...");
         Serial.println("RECEIVER_EMAIL: " + RECEIVER_EMAIL);
         EMailSender::Response resp = emailSend.send(RECEIVER_EMAIL, message);
-      
+     
         // Check result
         checkEmailValid(resp);
 
-        warningSent = true;
+        vibrationWarningSent = true;
+        vibrationWarningCleared = false;
       }
-    } 
+    }
     else if (alarmTriggered && count < HIT_THRESHOLD) {
       clearAlarm();
       Serial.println("Vibration subsided — alarm cleared.");
-      warningSent = false;
+      vibrationWarningSent = false;
+
+      if (vibrationWarningCleared == false) {
+        // Prepare email message
+        EMailSender::EMailMessage message;
+        message.subject = "Team LockBusters - Disturbance Cleared!";
+        message.message = "Strong vibration has cleared! Your scooter is now safe.";
+        message.mime = MIME_TEXT_PLAIN;
+     
+        // Send email
+        Serial.println("\nSending email via simple SMTP...");
+        Serial.println("RECEIVER_EMAIL: " + RECEIVER_EMAIL);
+        EMailSender::Response resp = emailSend.send(RECEIVER_EMAIL, message);
+     
+        // Check result
+        checkEmailValid(resp);
+
+        vibrationWarningCleared = true;
+      }
     }
     windowStart = now;
   }
